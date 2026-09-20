@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Threads — a connecting puzzle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Firebase (for accounts + cloud save). Replace firebaseConfig further down with your own project's config. -->
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.13.2/firebase-app-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.13.2/firebase-auth-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.13.2/firebase-firestore-compat.js"></script>
+<style>
+  :root {
+    --bg: #F5F3EE;
+    --surface: #FBFAF7;
+    --ink: #232323;
+    --ink-soft: #7a7568;
+    --line: #DEDAD0;
+    --line-strong: #c9c4b6;
+    color-scheme: light dark;
+    box-sizing: border-box;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1A17;
+      --surface: #232220;
+      --ink: #ECE8DE;
+      --ink-soft: #a39d8d;
+      --line: #3a382f;
+      --line-strong: #4c493c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1A17;
+    --surface: #232220;
+    --ink: #ECE8DE;
+    --ink-soft: #a39d8d;
+    --line: #3a382f;
+    --line-strong: #4c493c;
+  }
+  html, body { height: 100%; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100%;
+    padding: max(28px, env(safe-area-inset-top, 0px)) 20px max(28px, env(safe-area-inset-bottom, 0px));
+  }
+  .wrap {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+  .sound-toggle {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    right: 16px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 6px;
+    color: var(--ink-soft);
+  }
+  .sound-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
+  .account-toggle {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    left: 16px;
+    background: none;
+    border: none;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    padding: 6px 8px;
+    color: var(--ink-soft);
+    font-family: 'Inter', sans-serif;
+  }
+  .account-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
+  .account-form { display: flex; flex-direction: column; gap: 10px; width: 220px; text-align: left; }
+  .account-form input {
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    padding: 9px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  .account-form input:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .account-row { display: flex; gap: 8px; }
+  .account-row button {
+    flex: 1;
+    font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500;
+    padding: 9px 0; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line-strong); background: transparent; color: var(--ink);
+  }
+  .account-row button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .account-note { font-size: 12px; color: var(--ink-soft); margin: 0; text-align: center; }
+  .account-note.error { color: #b3432f; }
+  .account-link {
+    background: none; border: none; padding: 0; margin: 0;
+    font-family: 'Inter', sans-serif; font-size: 12px; color: var(--ink-soft);
+    text-decoration: underline; cursor: pointer; align-self: center;
+  }
+  header { text-align: center; }
+  h1 {
+    font-family: 'Fraunces', serif;
+    font-optical-sizing: auto;
+    font-weight: 500;
+    font-size: clamp(28px, 8vw, 38px);
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+  }
+  p.sub {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 14px;
+    line-height: 1.5;
+    max-width: 34ch;
+  }
+  .levels { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .level-pill {
+    min-width: 28px; height: 28px; padding: 0 6px;
+    border-radius: 8px;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 500;
+    color: var(--ink-soft);
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .level-pill.unlocked { color: var(--ink); }
+  .level-pill.solved { background: var(--line); }
+  .level-pill.active { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .level-pill:disabled { cursor: not-allowed; opacity: 0.4; }
+  .level-pill:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  p.difficulty {
+    margin: -8px 0 0;
+    font-size: 12px;
+    color: var(--ink-soft);
+    text-align: center;
+  }
+
+  .hud {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 14px;
+    color: var(--ink-soft);
+    padding: 0 2px;
+  }
+  .hud strong { color: var(--ink); font-weight: 500; }
+
+  .board-frame { position: relative; width: 100%; max-width: 420px; aspect-ratio: 1 / 1; }
+  .board {
+    position: absolute; inset: 0;
+    background: var(--surface);
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    overflow: hidden;
+    touch-action: none;
+  }
+  .cells { position: absolute; inset: 0; display: grid; }
+  .cell { border: 1px solid var(--line); }
+  svg.paths { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  .controls { display: flex; gap: 10px; width: 100%; }
+  button.action {
+    flex: 1;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px; font-weight: 500;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: 9px;
+    padding: 11px 0;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  button.action:hover { background: var(--line); }
+  button.action:active { background: var(--line-strong); }
+  button.action:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.action:focus-visible, .level-dot:focus-visible {
+    outline: 2px solid var(--ink); outline-offset: 2px;
+  }
+
+  .win-overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .win-overlay.show { opacity: 1; pointer-events: auto; }
+  @media (prefers-reduced-motion: reduce) { .win-overlay { transition: none; } }
+  .win-card { text-align: center; padding: 20px; position: relative; z-index: 2; }
+  .win-card p.title { font-family: 'Fraunces', serif; font-size: 24px; margin: 0 0 4px; }
+  .win-card p.detail { color: var(--ink-soft); font-size: 14px; margin: 0 0 2px; }
+  .win-card p.best { color: var(--ink-soft); font-size: 12px; margin: 0 0 16px; }
+  .win-card button {
+    font-family: 'Inter', sans-serif; font-weight: 500; font-size: 14px;
+    background: var(--ink); color: var(--bg);
+    border: none; border-radius: 9px; padding: 10px 22px; cursor: pointer;
+  }
+  .confetti-piece {
+    position: absolute; width: 7px; height: 7px; border-radius: 50%;
+    left: 50%; top: 34%;
+    animation: burst 0.9s ease-out forwards;
+  }
+  @keyframes burst { to { transform: translate(var(--tx), var(--ty)) scale(0.4); opacity: 0; } }
+  .ripple { pointer-events: none; }
+</style>
+</head>
+<body>
+<button class="sound-toggle" id="soundToggle" aria-label="Toggle sound">🔈</button>
+<button class="account-toggle" id="accountToggle" aria-label="Account">sign in</button>
+<div class="wrap">
+  <header>
+    <h1>Threads</h1>
+    <p class="sub">Connect each pair of matching dots. Every cell on the board has to be covered to solve it.</p>
+  </header>
+
+  <div class="levels" id="levelDots"></div>
+  <p class="difficulty" id="difficultyLabel">gentle</p>
+
+  <div class="hud">
+    <span>puzzle <strong id="hudLevel">1</strong>/<span id="hudTotal">6</span></span>
+    <span><strong id="hudMoves">0</strong> moves</span>
+    <span id="hudTime">0:00</span>
+  </div>
+
+  <div class="board-frame">
+    <div class="board" id="board" role="application" aria-label="Puzzle grid. Drag from a colored dot to its matching dot.">
+      <div class="cells" id="cells"></div>
+      <svg class="paths" id="paths" aria-hidden="true"></svg>
+    </div>
+    <div class="win-overlay" id="introOverlay">
+      <div class="win-card">
+        <p class="title">How to play</p>
+        <p class="detail">Drag between two matching dots to connect them.</p>
+        <p class="best">Cover every cell on the board to solve the puzzle.</p>
+        <button id="introOkBtn">Got it</button>
+      </div>
+    </div>
+    <div class="win-overlay" id="winOverlay">
+      <div class="win-card">
+        <p class="title">Solved</p>
+        <p class="detail" id="winDetail">in 0 moves</p>
+        <p class="best" id="winBest"></p>
+        <button id="nextBtn">Next puzzle</button>
+      </div>
+    </div>
+    <div class="win-overlay" id="accountOverlay">
+      <div class="win-card" id="accountCard"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="action" id="undoBtn">Undo</button>
+    <button class="action" id="hintBtn">Hint</button>
+    <button class="action" id="resetBtn">Reset</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  const LEVELS = [
+    { size: 5, colors: [
+      { id:'A', hex:'#2F6F63', path:[[0,0],[0,1],[0,2],[0,3],[0,4],[1,4]] },
+      { id:'B', hex:'#D6634A', path:[[1,3],[1,2],[1,1],[1,0],[2,0],[2,1]] },
+      { id:'C', hex:'#4A5FC1', path:[[2,2],[2,3],[2,4],[3,4],[3,3],[3,2]] },
+      { id:'D', hex:'#C99A3D', path:[[3,1],[3,0],[4,0],[4,1],[4,2],[4,3],[4,4]] },
+    ]},
+    { size: 6, colors: [
+      { id:'A', hex:'#2F6F63', path:[[0,0],[0,1],[0,2],[0,3],[0,4],[0,5],[1,5]] },
+      { id:'B', hex:'#D6634A', path:[[1,4],[1,3],[1,2],[1,1],[1,0],[2,0],[2,1]] },
+      { id:'C', hex:'#4A5FC1', path:[[2,2],[2,3],[2,4],[2,5],[3,5],[3,4],[3,3]] },
+      { id:'D', hex:'#C99A3D', path:[[3,2],[3,1],[3,0],[4,0],[4,1],[4,2],[4,3]] },
+      { id:'E', hex:'#8B5A8C', path:[[4,4],[4,5],[5,5],[5,4],[5,3],[5,2],[5,1],[5,0]] },
+    ]},
+    { size: 6, colors: [
+      { id:'A', hex:'#2F6F63', path:[[0,0],[0,1],[0,2],[0,3]] },
+      { id:'B', hex:'#D6634A', path:[[0,4],[0,5],[1,5],[1,4],[1,3],[1,2],[1,1]] },
+      { id:'C', hex:'#4A5FC1', path:[[1,0],[2,0],[2,1],[2,2],[2,3],[2,4]] },
+      { id:'D', hex:'#C99A3D', path:[[2,5],[3,5],[3,4],[3,3],[3,2],[3,1]] },
+      { id:'E', hex:'#8B5A8C', path:[[3,0],[4,0],[4,1],[4,2],[4,3],[4,4],[4,5]] },
+      { id:'F', hex:'#5C7A8A', path:[[5,5],[5,4],[5,3],[5,2],[5,1],[5,0]] },
+    ]},
+    { size: 7, colors: [
+      { id:'A', hex:'#2F6F63', path:[[0,0],[0,1],[0,2],[0,3],[0,4],[0,5],[0,6],[1,6]] },
+      { id:'B', hex:'#D6634A', path:[[1,5],[1,4],[1,3],[1,2],[1,1],[1,0],[2,0],[2,1]] },
+      { id:'C', hex:'#4A5FC1', path:[[2,2],[2,3],[2,4],[2,5],[2,6],[3,6],[3,5],[3,4]] },
+      { id:'D', hex:'#C99A3D', path:[[3,3],[3,2],[3,1],[3,0],[4,0],[4,1],[4,2],[4,3]] },
+      { id:'E', hex:'#8B5A8C', path:[[4,4],[4,5],[4,6],[5,6],[5,5],[5,4],[5,3],[5,2]] },
+      { id:'F', hex:'#5C7A8A', path:[[5,1],[5,0],[6,0],[6,1],[6,2],[6,3],[6,4],[6,5],[6,6]] },
+    ]},
+    { size: 7, colors: [
+      { id:'A', hex:'#2F6F63', path:[[0,0],[0,1],[0,2],[0,3]] },
+      { id:'B', hex:'#D6634A', path:[[0,4],[0,5],[0,6],[1,6],[1,5],[1,4],[1,3]] },
+      { id:'C', hex:'#4A5FC1', path:[[1,2],[1,1],[1,0],[2,0],[2,1],[2,2],[2,3]] },
+      { id:'D', hex:'#C99A3D', path:[[2,4],[2,5],[2,6],[3,6],[3,5],[3,4],[3,3]] },
+      { id:'E', hex:'#8B5A8C', path:[[3,2],[3,1],[3,0],[4,0],[4,1],[4,2],[4,3]] },
+      { id:'F', hex:'#5C7A8A', path:[[4,4],[4,5],[4,6],[5,6],[5,5],[5,4],[5,3]] },
+      { id:'G', hex:'#A2472F', path:[[5,2],[5,1],[5,0],[6,0],[6,1],[6,2],[6,3],[6,4],[6,5],[6,6]] },
+    ]},
+    { size: 8, colors: [
+      { id:'A', hex:'#2F6F63', path:[[0,0],[0,1],[0,2],[0,3]] },
+      { id:'B', hex:'#D6634A', path:[[0,4],[0,5],[0,6],[0,7],[1,7],[1,6],[1,5],[1,4]] },
+      { id:'C', hex:'#4A5FC1', path:[[1,3],[1,2],[1,1],[1,0],[2,0],[2,1],[2,2],[2,3]] },
+      { id:'D', hex:'#C99A3D', path:[[2,4],[2,5],[2,6],[2,7],[3,7],[3,6],[3,5],[3,4]] },
+      { id:'E', hex:'#8B5A8C', path:[[3,3],[3,2],[3,1],[3,0],[4,0],[4,1],[4,2],[4,3]] },
+      { id:'F', hex:'#5C7A8A', path:[[4,4],[4,5],[4,6],[4,7],[5,7],[5,6],[5,5],[5,4]] },
+      { id:'G', hex:'#A2472F', path:[[5,3],[5,2],[5,1],[5,0],[6,0],[6,1],[6,2],[6,3]] },
+      { id:'H', hex:'#6B7F3D', path:[[6,4],[6,5],[6,6],[6,7],[7,7],[7,6],[7,5],[7,4],[7,3],[7,2],[7,1],[7,0]] },
+    ]},
+  ];
+
+  const DIFFICULTY = ['gentle', 'easy', 'easy', 'medium', 'medium', 'hard'];
+
+  // ---- Firebase (accounts + cloud save) ----
+  // Replace this with the firebaseConfig object from your own Firebase project's
+  // Project settings → Your apps. Until you do, the game still works fully offline.
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    projectId: "YOUR_PROJECT",
+    storageBucket: "YOUR_PROJECT.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+  const fbEnabled = firebaseConfig.apiKey && firebaseConfig.apiKey !== 'YOUR_API_KEY';
+  let auth = null, db = null;
+  if (fbEnabled) {
+    try {
+      firebase.initializeApp(firebaseConfig);
+      auth = firebase.auth();
+      db = firebase.firestore();
+    } catch (e) { console.error('Firebase init failed', e); }
+  }
+
+  let furthestUnlocked = 0;
+  try {
+    const saved = localStorage.getItem('threads-furthest');
+    if (saved !== null) furthestUnlocked = parseInt(saved, 10) || 0;
+  } catch (e) {}
+
+  let soundOn = false;
+  try { soundOn = localStorage.getItem('threads-sound') === 'on'; } catch (e) {}
+
+  let levelIndex = 0;
+  let size = 0;
+  let colors = [];
+  let cellOwner = [];
+  let dragging = null;
+  let moves = 0;
+  let moveCounted = false;
+  let lastTouchedColorId = null;
+  let timerStart = null;
+  let timerInterval = null;
+  let audioCtx = null;
+
+  const boardEl = document.getElementById('board');
+  const cellsEl = document.getElementById('cells');
+  const svgEl = document.getElementById('paths');
+  const hudLevel = document.getElementById('hudLevel');
+  const hudMoves = document.getElementById('hudMoves');
+  const hudTime = document.getElementById('hudTime');
+  const levelDotsEl = document.getElementById('levelDots');
+  const winOverlay = document.getElementById('winOverlay');
+  const winDetail = document.getElementById('winDetail');
+  const winBest = document.getElementById('winBest');
+  const introOverlay = document.getElementById('introOverlay');
+  const difficultyLabel = document.getElementById('difficultyLabel');
+  const accountToggle = document.getElementById('accountToggle');
+  const accountOverlay = document.getElementById('accountOverlay');
+  const accountCard = document.getElementById('accountCard');
+  const soundToggle = document.getElementById('soundToggle');
+  const undoBtn = document.getElementById('undoBtn');
+  const hintBtn = document.getElementById('hintBtn');
+
+  document.getElementById('hudTotal').textContent = LEVELS.length;
+  soundToggle.textContent = soundOn ? '🔊' : '🔈';
+
+  function reducedMotion() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+  function beep(freq, dur, type, vol) {
+    if (!soundOn) return;
+    try {
+      const ctx = getAudioCtx();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = freq;
+      o.type = type || 'sine';
+      g.gain.value = vol || 0.05;
+      o.connect(g); g.connect(ctx.destination);
+      o.start();
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+      o.stop(ctx.currentTime + dur);
+    } catch (e) {}
+  }
+  function playConnectSound() { beep(560, 0.12, 'sine', 0.05); }
+  function playWinSound() {
+    beep(523, 0.16, 'triangle', 0.06);
+    setTimeout(() => beep(659, 0.16, 'triangle', 0.06), 110);
+    setTimeout(() => beep(784, 0.22, 'triangle', 0.06), 220);
+  }
+
+  soundToggle.addEventListener('click', () => {
+    soundOn = !soundOn;
+    soundToggle.textContent = soundOn ? '🔊' : '🔈';
+    try { localStorage.setItem('threads-sound', soundOn ? 'on' : 'off'); } catch (e) {}
+    if (soundOn) beep(560, 0.1, 'sine', 0.05);
+  });
+
+  function vibrate(pattern) {
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+  }
+
+  function spawnRipple(r, c, hex) {
+    if (reducedMotion()) return;
+    const circ = svgNS('circle');
+    circ.setAttribute('cx', c + 0.5);
+    circ.setAttribute('cy', r + 0.5);
+    circ.setAttribute('r', 0.16);
+    circ.setAttribute('fill', 'none');
+    circ.setAttribute('stroke', hex);
+    circ.setAttribute('stroke-width', 0.05);
+    circ.setAttribute('opacity', '0.8');
+    circ.classList.add('ripple');
+    svgEl.appendChild(circ);
+    requestAnimationFrame(() => {
+      circ.style.transition = 'r 0.35s ease-out, opacity 0.35s ease-out';
+      circ.setAttribute('r', 0.46);
+      circ.setAttribute('opacity', '0');
+    });
+    setTimeout(() => circ.remove(), 380);
+  }
+
+  function key(r, c) { return r + '_' + c; }
+
+  // ---- Account UI ----
+  function renderAccountNotConfigured() {
+    accountCard.innerHTML = `
+      <p class="title">Accounts</p>
+      <p class="detail">This copy of the game has no Firebase project connected yet.</p>
+      <p class="account-note">Add your firebaseConfig near the top of the script to enable sign in.</p>
+      <button id="accountCloseBtn">Close</button>
+    `;
+    document.getElementById('accountCloseBtn').addEventListener('click', () => accountOverlay.classList.remove('show'));
+  }
+
+  function renderAccountLoggedOut(errorMsg) {
+    accountCard.innerHTML = `
+      <p class="title">Sign in</p>
+      <p class="detail">Save your progress and play it on any device.</p>
+      <form class="account-form" id="accountForm">
+        <input type="email" id="accEmail" placeholder="Email" autocomplete="email" required />
+        <input type="password" id="accPassword" placeholder="Password" autocomplete="current-password" required minlength="6" />
+        <div class="account-row">
+          <button type="submit" class="primary" id="accSignInBtn">Sign in</button>
+          <button type="button" id="accSignUpBtn">Create account</button>
+        </div>
+        ${errorMsg ? `<p class="account-note error">${errorMsg}</p>` : ''}
+        <button type="button" class="account-link" id="accCancelBtn">Continue without an account</button>
+      </form>
+    `;
+    document.getElementById('accountForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = document.getElementById('accEmail').value.trim();
+      const pass = document.getElementById('accPassword').value;
+      signIn(email, pass);
+    });
+    document.getElementById('accSignUpBtn').addEventListener('click', () => {
+      const email = document.getElementById('accEmail').value.trim();
+      const pass = document.getElementById('accPassword').value;
+      signUp(email, pass);
+    });
+    document.getElementById('accCancelBtn').addEventListener('click', () => accountOverlay.classList.remove('show'));
+  }
+
+  function renderAccountLoggedIn(user) {
+    accountCard.innerHTML = `
+      <p class="title">Signed in</p>
+      <p class="detail">${user.email}</p>
+      <p class="account-note">Your progress syncs to this account.</p>
+      <button id="accSignOutBtn">Log out</button>
+    `;
+    document.getElementById('accSignOutBtn').addEventListener('click', () => { auth.signOut(); accountOverlay.classList.remove('show'); });
+  }
+
+  function accountErrorMessage(err) {
+    const code = err && err.code || '';
+    if (code.includes('email-already-in-use')) return 'That email already has an account — try signing in.';
+    if (code.includes('wrong-password') || code.includes('invalid-credential')) return 'Incorrect email or password.';
+    if (code.includes('weak-password')) return 'Password needs to be at least 6 characters.';
+    if (code.includes('invalid-email')) return 'That email address looks invalid.';
+    if (code.includes('user-not-found')) return 'No account with that email — try creating one.';
+    return 'Something went wrong. Please try again.';
+  }
+
+  function signIn(email, pass) {
+    auth.signInWithEmailAndPassword(email, pass).catch(err => renderAccountLoggedOut(accountErrorMessage(err)));
+  }
+  function signUp(email, pass) {
+    auth.createUserWithEmailAndPassword(email, pass).catch(err => renderAccountLoggedOut(accountErrorMessage(err)));
+  }
+
+  accountToggle.addEventListener('click', () => {
+    if (!fbEnabled) { renderAccountNotConfigured(); accountOverlay.classList.add('show'); return; }
+    if (auth.currentUser) renderAccountLoggedIn(auth.currentUser);
+    else renderAccountLoggedOut();
+    accountOverlay.classList.add('show');
+  });
+
+  // ---- Cloud save/load ----
+  function saveCloudProgress() {
+    if (!fbEnabled || !auth || !auth.currentUser || !db) return;
+    const best = {};
+    for (let i = 0; i < LEVELS.length; i++) {
+      try {
+        const v = JSON.parse(localStorage.getItem('threads-best-' + i) || 'null');
+        if (v) best[i] = v;
+      } catch (e) {}
+    }
+    db.collection('players').doc(auth.currentUser.uid)
+      .set({ furthestUnlocked, best }, { merge: true })
+      .catch(e => console.error('Cloud save failed', e));
+  }
+
+  function loadCloudProgress(uid) {
+    db.collection('players').doc(uid).get().then(doc => {
+      if (doc.exists) {
+        const data = doc.data();
+        furthestUnlocked = data.furthestUnlocked || 0;
+        try { localStorage.setItem('threads-furthest', String(furthestUnlocked)); } catch (e) {}
+        if (data.best) {
+          Object.keys(data.best).forEach(k => {
+            try { localStorage.setItem('threads-best-' + k, JSON.stringify(data.best[k])); } catch (e) {}
+          });
+        }
+        renderLevelDots();
+        initLevel(Math.min(furthestUnlocked, LEVELS.length - 1));
+      } else {
+        saveCloudProgress();
+      }
+    }).catch(e => console.error('Cloud load failed', e));
+  }
+
+  if (fbEnabled) {
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        accountToggle.textContent = user.email.split('@')[0];
+        loadCloudProgress(user.uid);
+      } else {
+        accountToggle.textContent = 'sign in';
+      }
+    });
+  }
+  function sameCell(p, q) { return p && q && p[0] === q[0] && p[1] === q[1]; }
+
+  function formatTime(totalSeconds) {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return m + ':' + String(s).padStart(2, '0');
+  }
+  function startTimerIfNeeded() {
+    if (timerStart !== null) return;
+    timerStart = Date.now();
+    timerInterval = setInterval(() => {
+      hudTime.textContent = formatTime(Math.floor((Date.now() - timerStart) / 1000));
+    }, 250);
+  }
+  function stopTimer() {
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  }
+  function elapsedSeconds() {
+    return timerStart === null ? 0 : Math.floor((Date.now() - timerStart) / 1000);
+  }
+
+  function initLevel(idx) {
+    levelIndex = idx;
+    const lvl = LEVELS[idx];
+    size = lvl.size;
+    colors = lvl.colors.map(c => ({
+      id: c.id, hex: c.hex, solution: c.path,
+      a: c.path[0], b: c.path[c.path.length - 1],
+      path: []
+    }));
+    cellOwner = Array.from({ length: size }, () => Array(size).fill(null));
+    moves = 0;
+    dragging = null;
+    lastTouchedColorId = null;
+    stopTimer();
+    timerStart = null;
+    hudTime.textContent = '0:00';
+    hudLevel.textContent = idx + 1;
+    hudMoves.textContent = '0';
+    difficultyLabel.textContent = DIFFICULTY[idx] || '';
+    winOverlay.classList.remove('show');
+    winOverlay.querySelectorAll('.confetti-piece').forEach(el => el.remove());
+    buildGrid();
+    renderLevelDots();
+    renderPaths();
+  }
+
+  function buildGrid() {
+    cellsEl.style.gridTemplateColumns = `repeat(${size}, 1fr)`;
+    cellsEl.style.gridTemplateRows = `repeat(${size}, 1fr)`;
+    cellsEl.innerHTML = '';
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        const d = document.createElement('div');
+        d.className = 'cell';
+        cellsEl.appendChild(d);
+      }
+    }
+    svgEl.setAttribute('viewBox', `0 0 ${size} ${size}`);
+  }
+
+  function renderLevelDots() {
+    levelDotsEl.innerHTML = '';
+    LEVELS.forEach((_, i) => {
+      const btn = document.createElement('button');
+      const solved = i < furthestUnlocked;
+      const unlocked = i <= furthestUnlocked;
+      btn.className = 'level-pill' + (unlocked ? ' unlocked' : '') + (solved ? ' solved' : '') + (i === levelIndex ? ' active' : '');
+      btn.textContent = String(i + 1);
+      btn.setAttribute('aria-label', 'Puzzle ' + (i + 1) + (solved ? ', solved' : ''));
+      btn.disabled = i > furthestUnlocked;
+      btn.addEventListener('click', () => initLevel(i));
+      levelDotsEl.appendChild(btn);
+    });
+  }
+
+  function svgNS(tag) { return document.createElementNS('http://www.w3.org/2000/svg', tag); }
+
+  function renderPaths() {
+    svgEl.innerHTML = '';
+    colors.forEach(col => {
+      [col.a, col.b].forEach(pt => {
+        const circ = svgNS('circle');
+        circ.setAttribute('cx', pt[1] + 0.5);
+        circ.setAttribute('cy', pt[0] + 0.5);
+        circ.setAttribute('r', 0.30);
+        circ.setAttribute('fill', col.hex);
+        svgEl.appendChild(circ);
+      });
+      if (col.path.length > 1) {
+        const pts = col.path.map(p => (p[1] + 0.5) + ',' + (p[0] + 0.5)).join(' ');
+        const line = svgNS('polyline');
+        line.setAttribute('points', pts);
+        line.setAttribute('fill', 'none');
+        line.setAttribute('stroke', col.hex);
+        line.setAttribute('stroke-width', 0.26);
+        line.setAttribute('stroke-linecap', 'round');
+        line.setAttribute('stroke-linejoin', 'round');
+        svgEl.appendChild(line);
+      } else if (col.path.length === 1) {
+        const circ = svgNS('circle');
+        circ.setAttribute('cx', col.path[0][1] + 0.5);
+        circ.setAttribute('cy', col.path[0][0] + 0.5);
+        circ.setAttribute('r', 0.32);
+        circ.setAttribute('fill', col.hex);
+        svgEl.appendChild(circ);
+      }
+    });
+  }
+
+  function freeCellsAfter(col, keepLength) {
+    for (let i = keepLength; i < col.path.length; i++) {
+      const [r, c] = col.path[i];
+      if (cellOwner[r][c] === col.id) cellOwner[r][c] = null;
+    }
+    col.path = col.path.slice(0, keepLength);
+  }
+
+  function findColorAt(r, c) {
+    return colors.find(col => sameCell(col.a, [r, c]) || sameCell(col.b, [r, c]) || cellOwner[r][c] === col.id);
+  }
+
+  function getCellFromEvent(e) {
+    const rect = boardEl.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (x < 0 || y < 0 || x >= rect.width || y >= rect.height) return null;
+    const c = Math.floor((x / rect.width) * size);
+    const r = Math.floor((y / rect.height) * size);
+    if (r < 0 || r >= size || c < 0 || c >= size) return null;
+    return [r, c];
+  }
+
+  function onPointerDown(e) {
+    const cell = getCellFromEvent(e);
+    if (!cell) return;
+    const [r, c] = cell;
+    const col = findColorAt(r, c);
+    if (!col) return;
+    boardEl.setPointerCapture(e.pointerId);
+    moveCounted = false;
+    startTimerIfNeeded();
+
+    const idx = col.path.findIndex(p => sameCell(p, [r, c]));
+    if (idx >= 0) {
+      freeCellsAfter(col, idx + 1);
+    } else {
+      freeCellsAfter(col, 0);
+      col.path = [[r, c]];
+    }
+    cellOwner[r][c] = col.id;
+    dragging = col.id;
+    lastTouchedColorId = col.id;
+    renderPaths();
+  }
+
+  function onPointerMove(e) {
+    if (!dragging) return;
+    const cell = getCellFromEvent(e);
+    if (!cell) return;
+    const [r, c] = cell;
+    const col = colors.find(x => x.id === dragging);
+    const last = col.path[col.path.length - 1];
+    if (sameCell(last, [r, c])) return;
+
+    const dr = Math.abs(r - last[0]);
+    const dc = Math.abs(c - last[1]);
+    if (dr + dc !== 1) return;
+
+    if (col.path.length > 1 && sameCell(col.path[col.path.length - 2], [r, c])) {
+      cellOwner[last[0]][last[1]] = null;
+      col.path.pop();
+      renderPaths();
+      return;
+    }
+
+    const occupant = cellOwner[r][c];
+    if (occupant && occupant !== col.id) return;
+
+    const wasConnectedBefore = isConnected(col);
+    const isOwnOtherEndpoint = (sameCell(col.a, [r, c]) || sameCell(col.b, [r, c])) && !sameCell(col.path[0], [r, c]);
+
+    if (occupant === col.id) {
+      const idx = col.path.findIndex(p => sameCell(p, [r, c]));
+      if (idx >= 0) freeCellsAfter(col, idx + 1);
+    } else {
+      col.path.push([r, c]);
+      cellOwner[r][c] = col.id;
+      if (!moveCounted) { moves++; hudMoves.textContent = moves; moveCounted = true; }
+    }
+    lastTouchedColorId = col.id;
+    renderPaths();
+    if (isOwnOtherEndpoint && !wasConnectedBefore) {
+      playConnectSound();
+      vibrate(15);
+      spawnRipple(r, c, col.hex);
+      dragging = null;
+      checkWin();
+    } else {
+      vibrate(4);
+    }
+  }
+
+  function onPointerUp() { dragging = null; checkWin(); }
+
+  function isConnected(col) {
+    if (col.path.length < 1) return false;
+    const start = col.path[0];
+    const end = col.path[col.path.length - 1];
+    const startIsA = sameCell(start, col.a);
+    const endpointMatch = startIsA ? sameCell(end, col.b) : sameCell(end, col.a);
+    return endpointMatch && (sameCell(start, col.a) || sameCell(start, col.b));
+  }
+
+  function checkWin() {
+    const allConnected = colors.every(isConnected);
+    if (!allConnected) return;
+    let filled = 0;
+    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) if (cellOwner[r][c]) filled++;
+    if (filled !== size * size) return;
+
+    stopTimer();
+    const seconds = elapsedSeconds();
+
+    if (levelIndex + 1 > furthestUnlocked) {
+      furthestUnlocked = Math.min(levelIndex + 1, LEVELS.length - 1);
+      try { localStorage.setItem('threads-furthest', String(furthestUnlocked)); } catch (e) {}
+    }
+
+    let bestText = '';
+    try {
+      const key = 'threads-best-' + levelIndex;
+      const prev = JSON.parse(localStorage.getItem(key) || 'null');
+      if (!prev || moves < prev.moves || (moves === prev.moves && seconds < prev.seconds)) {
+        localStorage.setItem(key, JSON.stringify({ moves, seconds }));
+        bestText = 'new best';
+      } else {
+        bestText = 'best: ' + prev.moves + ' moves, ' + formatTime(prev.seconds);
+      }
+    } catch (e) {}
+
+    winDetail.textContent = 'in ' + moves + ' move' + (moves === 1 ? '' : 's') + ', ' + formatTime(seconds);
+    winBest.textContent = bestText;
+    document.getElementById('nextBtn').textContent = levelIndex < LEVELS.length - 1 ? 'Next puzzle' : 'Play again';
+    winOverlay.classList.add('show');
+    renderLevelDots();
+    playWinSound();
+    vibrate([15, 40, 15]);
+    spawnConfetti();
+    saveCloudProgress();
+  }
+
+  function spawnConfetti() {
+    if (reducedMotion()) return;
+    const palette = colors.map(c => c.hex);
+    for (let i = 0; i < 18; i++) {
+      const piece = document.createElement('div');
+      piece.className = 'confetti-piece';
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 60 + Math.random() * 90;
+      piece.style.setProperty('--tx', Math.cos(angle) * dist + 'px');
+      piece.style.setProperty('--ty', Math.sin(angle) * dist - 30 + 'px');
+      piece.style.background = palette[i % palette.length];
+      piece.style.animationDelay = (Math.random() * 0.15) + 's';
+      winOverlay.appendChild(piece);
+      setTimeout(() => piece.remove(), 1200);
+    }
+  }
+
+  function undo() {
+    if (!lastTouchedColorId) return;
+    const col = colors.find(c => c.id === lastTouchedColorId);
+    if (!col || col.path.length === 0) return;
+    freeCellsAfter(col, Math.max(0, col.path.length - 1));
+    renderPaths();
+  }
+
+  function hint() {
+    const target = colors.find(c => !isConnected(c));
+    if (!target) return;
+    startTimerIfNeeded();
+    freeCellsAfter(target, 0);
+    target.path = [];
+    target.solution.forEach(([r, c]) => {
+      const occ = cellOwner[r][c];
+      if (occ && occ !== target.id) {
+        const owner = colors.find(x => x.id === occ);
+        const idx = owner.path.findIndex(p => sameCell(p, [r, c]));
+        if (idx >= 0) freeCellsAfter(owner, idx);
+      }
+      target.path.push([r, c]);
+      cellOwner[r][c] = target.id;
+    });
+    lastTouchedColorId = target.id;
+    renderPaths();
+    spawnRipple(target.b[0], target.b[1], target.hex);
+    vibrate(8);
+    checkWin();
+  }
+
+  boardEl.addEventListener('pointerdown', onPointerDown);
+  boardEl.addEventListener('pointermove', onPointerMove);
+  boardEl.addEventListener('pointerup', onPointerUp);
+  boardEl.addEventListener('pointercancel', onPointerUp);
+
+  document.getElementById('resetBtn').addEventListener('click', () => initLevel(levelIndex));
+  document.getElementById('undoBtn').addEventListener('click', undo);
+  document.getElementById('hintBtn').addEventListener('click', hint);
+  document.getElementById('nextBtn').addEventListener('click', () => {
+    if (levelIndex < LEVELS.length - 1) initLevel(levelIndex + 1);
+    else initLevel(levelIndex);
+  });
+
+  document.getElementById('introOkBtn').addEventListener('click', () => {
+    introOverlay.classList.remove('show');
+    try { localStorage.setItem('threads-seen-intro', 'yes'); } catch (e) {}
+  });
+
+  initLevel(0);
+
+  let seenIntro = false;
+  try { seenIntro = localStorage.getItem('threads-seen-intro') === 'yes'; } catch (e) {}
+  if (!seenIntro) introOverlay.classList.add('show');
+})();
+</script>
+</body>
+</html>
