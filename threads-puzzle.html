@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Threads — a connecting puzzle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F5F3EE;
+    --surface: #FBFAF7;
+    --ink: #232323;
+    --ink-soft: #7a7568;
+    --line: #DEDAD0;
+    --line-strong: #c9c4b6;
+    color-scheme: light dark;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1B1A17;
+      --surface: #232220;
+      --ink: #ECE8DE;
+      --ink-soft: #a39d8d;
+      --line: #3a382f;
+      --line-strong: #4c493c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1B1A17;
+    --surface: #232220;
+    --ink: #ECE8DE;
+    --ink-soft: #a39d8d;
+    --line: #3a382f;
+    --line-strong: #4c493c;
+  }
+  html, body {
+    height: 100%;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100%;
+    padding: max(28px, env(safe-area-inset-top, 0px)) 20px max(28px, env(safe-area-inset-bottom, 0px));
+  }
+  .wrap {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+  }
+  header {
+    text-align: center;
+  }
+  h1 {
+    font-family: 'Fraunces', serif;
+    font-optical-sizing: auto;
+    font-weight: 500;
+    font-size: clamp(28px, 8vw, 38px);
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+  }
+  p.sub {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 14px;
+    line-height: 1.5;
+    max-width: 34ch;
+  }
+  .levels {
+    display: flex;
+    gap: 8px;
+  }
+  .level-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--line);
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .level-dot.unlocked { background: var(--line-strong); }
+  .level-dot.active { background: var(--ink); transform: scale(1.25); }
+  .level-dot:disabled { cursor: not-allowed; }
+
+  .hud {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 14px;
+    color: var(--ink-soft);
+    padding: 0 2px;
+  }
+  .hud strong { color: var(--ink); font-weight: 500; }
+
+  .board-frame {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    aspect-ratio: 1 / 1;
+  }
+  .board {
+    position: absolute;
+    inset: 0;
+    background: var(--surface);
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    overflow: hidden;
+    touch-action: none;
+  }
+  .cells {
+    position: absolute;
+    inset: 0;
+    display: grid;
+  }
+  .cell {
+    border: 1px solid var(--line);
+  }
+  svg.paths {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  .controls {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+  }
+  button.action {
+    flex: 1;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: 9px;
+    padding: 11px 0;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  button.action:hover { background: var(--line); }
+  button.action:active { background: var(--line-strong); }
+  button.action:focus-visible, .level-dot:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+
+  .win-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+    border-radius: 14px;
+  }
+  .win-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .win-overlay { transition: none; }
+  }
+  .win-card {
+    text-align: center;
+    padding: 20px;
+  }
+  .win-card p.title {
+    font-family: 'Fraunces', serif;
+    font-size: 24px;
+    margin: 0 0 4px;
+  }
+  .win-card p.detail {
+    color: var(--ink-soft);
+    font-size: 14px;
+    margin: 0 0 16px;
+  }
+  .win-card button {
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    background: var(--ink);
+    color: var(--bg);
+    border: none;
+    border-radius: 9px;
+    padding: 10px 22px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Threads</h1>
+    <p class="sub">Connect each pair of matching dots. Every cell on the board has to be covered to solve it.</p>
+  </header>
+
+  <div class="levels" id="levelDots"></div>
+
+  <div class="hud">
+    <span>puzzle <strong id="hudLevel">1</strong> of <span id="hudTotal">4</span></span>
+    <span><strong id="hudMoves">0</strong> moves</span>
+  </div>
+
+  <div class="board-frame">
+    <div class="board" id="board" role="application" aria-label="Puzzle grid. Drag from a colored dot to its matching dot.">
+      <div class="cells" id="cells"></div>
+      <svg class="paths" id="paths" aria-hidden="true"></svg>
+    </div>
+    <div class="win-overlay" id="winOverlay">
+      <div class="win-card">
+        <p class="title">Solved</p>
+        <p class="detail" id="winDetail">in 0 moves</p>
+        <button id="nextBtn">Next puzzle</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="action" id="resetBtn">Reset</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  const LEVELS = [
+    { size: 5, colors: [
+      { id:'A', hex:'#2F6F63', a:[0,0], b:[1,4] },
+      { id:'B', hex:'#D6634A', a:[1,3], b:[2,1] },
+      { id:'C', hex:'#4A5FC1', a:[2,2], b:[3,2] },
+      { id:'D', hex:'#C99A3D', a:[3,1], b:[4,4] },
+    ]},
+    { size: 6, colors: [
+      { id:'A', hex:'#2F6F63', a:[0,0], b:[1,5] },
+      { id:'B', hex:'#D6634A', a:[1,4], b:[2,1] },
+      { id:'C', hex:'#4A5FC1', a:[2,2], b:[3,3] },
+      { id:'D', hex:'#C99A3D', a:[3,2], b:[4,3] },
+      { id:'E', hex:'#8B5A8C', a:[4,4], b:[5,0] },
+    ]},
+    { size: 6, colors: [
+      { id:'A', hex:'#2F6F63', a:[0,0], b:[0,3] },
+      { id:'B', hex:'#D6634A', a:[0,4], b:[1,1] },
+      { id:'C', hex:'#4A5FC1', a:[1,0], b:[2,4] },
+      { id:'D', hex:'#C99A3D', a:[2,5], b:[3,1] },
+      { id:'E', hex:'#8B5A8C', a:[3,0], b:[4,5] },
+      { id:'F', hex:'#5C7A8A', a:[5,5], b:[5,0] },
+    ]},
+    { size: 7, colors: [
+      { id:'A', hex:'#2F6F63', a:[0,0], b:[1,6] },
+      { id:'B', hex:'#D6634A', a:[1,5], b:[2,1] },
+      { id:'C', hex:'#4A5FC1', a:[2,2], b:[3,4] },
+      { id:'D', hex:'#C99A3D', a:[3,3], b:[4,3] },
+      { id:'E', hex:'#8B5A8C', a:[4,4], b:[5,2] },
+      { id:'F', hex:'#5C7A8A', a:[5,1], b:[6,6] },
+    ]},
+  ];
+
+  let furthestUnlocked = 0;
+  try {
+    const saved = localStorage.getItem('threads-furthest');
+    if (saved !== null) furthestUnlocked = parseInt(saved, 10) || 0;
+  } catch (e) {}
+
+  let levelIndex = 0;
+  let size = 0;
+  let colors = [];
+  let cellOwner = [];
+  let dragging = null;
+  let moves = 0;
+
+  const boardEl = document.getElementById('board');
+  const cellsEl = document.getElementById('cells');
+  const svgEl = document.getElementById('paths');
+  const hudLevel = document.getElementById('hudLevel');
+  const hudMoves = document.getElementById('hudMoves');
+  const levelDotsEl = document.getElementById('levelDots');
+  const winOverlay = document.getElementById('winOverlay');
+  const winDetail = document.getElementById('winDetail');
+
+  document.getElementById('hudTotal').textContent = LEVELS.length;
+
+  function key(r, c) { return r + '_' + c; }
+  function sameCell(p, q) { return p && q && p[0] === q[0] && p[1] === q[1]; }
+
+  function initLevel(idx) {
+    levelIndex = idx;
+    const lvl = LEVELS[idx];
+    size = lvl.size;
+    colors = lvl.colors.map(c => ({ ...c, path: [] }));
+    cellOwner = Array.from({ length: size }, () => Array(size).fill(null));
+    moves = 0;
+    dragging = null;
+    hudLevel.textContent = idx + 1;
+    hudMoves.textContent = '0';
+    winOverlay.classList.remove('show');
+    buildGrid();
+    renderLevelDots();
+    renderPaths();
+  }
+
+  function buildGrid() {
+    cellsEl.style.gridTemplateColumns = `repeat(${size}, 1fr)`;
+    cellsEl.style.gridTemplateRows = `repeat(${size}, 1fr)`;
+    cellsEl.innerHTML = '';
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        const d = document.createElement('div');
+        d.className = 'cell';
+        cellsEl.appendChild(d);
+      }
+    }
+    svgEl.setAttribute('viewBox', `0 0 ${size} ${size}`);
+  }
+
+  function renderLevelDots() {
+    levelDotsEl.innerHTML = '';
+    LEVELS.forEach((_, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'level-dot' + (i <= furthestUnlocked ? ' unlocked' : '') + (i === levelIndex ? ' active' : '');
+      btn.setAttribute('aria-label', 'Puzzle ' + (i + 1));
+      btn.disabled = i > furthestUnlocked;
+      btn.addEventListener('click', () => initLevel(i));
+      levelDotsEl.appendChild(btn);
+    });
+  }
+
+  function svgNS(tag) { return document.createElementNS('http://www.w3.org/2000/svg', tag); }
+
+  function renderPaths() {
+    svgEl.innerHTML = '';
+    colors.forEach(col => {
+      // endpoint markers, drawn first so the line sits on top
+      [col.a, col.b].forEach(pt => {
+        const circ = svgNS('circle');
+        circ.setAttribute('cx', pt[1] + 0.5);
+        circ.setAttribute('cy', pt[0] + 0.5);
+        circ.setAttribute('r', 0.30);
+        circ.setAttribute('fill', col.hex);
+        svgEl.appendChild(circ);
+      });
+      if (col.path.length > 1) {
+        const pts = col.path.map(p => (p[1] + 0.5) + ',' + (p[0] + 0.5)).join(' ');
+        const line = svgNS('polyline');
+        line.setAttribute('points', pts);
+        line.setAttribute('fill', 'none');
+        line.setAttribute('stroke', col.hex);
+        line.setAttribute('stroke-width', 0.26);
+        line.setAttribute('stroke-linecap', 'round');
+        line.setAttribute('stroke-linejoin', 'round');
+        svgEl.appendChild(line);
+      } else if (col.path.length === 1) {
+        // single cell selected but not yet extended: slightly larger dot to show it's live
+        const circ = svgNS('circle');
+        circ.setAttribute('cx', col.path[0][1] + 0.5);
+        circ.setAttribute('cy', col.path[0][0] + 0.5);
+        circ.setAttribute('r', 0.32);
+        circ.setAttribute('fill', col.hex);
+        svgEl.appendChild(circ);
+      }
+    });
+  }
+
+  function freeCellsAfter(col, keepLength) {
+    for (let i = keepLength; i < col.path.length; i++) {
+      const [r, c] = col.path[i];
+      if (cellOwner[r][c] === col.id) cellOwner[r][c] = null;
+    }
+    col.path = col.path.slice(0, keepLength);
+  }
+
+  function findColorAt(r, c) {
+    return colors.find(col => sameCell(col.a, [r, c]) || sameCell(col.b, [r, c]) || cellOwner[r][c] === col.id);
+  }
+
+  function getCellFromEvent(e) {
+    const rect = boardEl.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (x < 0 || y < 0 || x >= rect.width || y >= rect.height) return null;
+    const c = Math.floor((x / rect.width) * size);
+    const r = Math.floor((y / rect.height) * size);
+    if (r < 0 || r >= size || c < 0 || c >= size) return null;
+    return [r, c];
+  }
+
+  let moveCounted = false;
+
+  function onPointerDown(e) {
+    const cell = getCellFromEvent(e);
+    if (!cell) return;
+    const [r, c] = cell;
+    const col = findColorAt(r, c);
+    if (!col) return;
+    boardEl.setPointerCapture(e.pointerId);
+    moveCounted = false;
+
+    // find index of this cell within the color's current path
+    const idx = col.path.findIndex(p => sameCell(p, [r, c]));
+    if (idx >= 0) {
+      freeCellsAfter(col, idx + 1);
+    } else {
+      // starting fresh from an endpoint that has no path yet
+      freeCellsAfter(col, 0);
+      col.path = [[r, c]];
+    }
+    cellOwner[r][c] = col.id;
+    dragging = col.id;
+    renderPaths();
+  }
+
+  function onPointerMove(e) {
+    if (!dragging) return;
+    const cell = getCellFromEvent(e);
+    if (!cell) return;
+    const [r, c] = cell;
+    const col = colors.find(x => x.id === dragging);
+    const last = col.path[col.path.length - 1];
+    if (sameCell(last, [r, c])) return;
+
+    const dr = Math.abs(r - last[0]);
+    const dc = Math.abs(c - last[1]);
+    if (dr + dc !== 1) return; // must be orthogonally adjacent
+
+    // backtrack
+    if (col.path.length > 1 && sameCell(col.path[col.path.length - 2], [r, c])) {
+      cellOwner[last[0]][last[1]] = null;
+      col.path.pop();
+      renderPaths();
+      return;
+    }
+
+    const occupant = cellOwner[r][c];
+    if (occupant && occupant !== col.id) return; // blocked by another color
+
+    const isOtherEnd = sameCell(col.a, [r, c]) ? !sameCell(col.a, col.path[0]) : (sameCell(col.b, [r, c]) ? !sameCell(col.b, col.path[0]) : false);
+    const isOwnOtherEndpoint = (sameCell(col.a, [r,c]) || sameCell(col.b, [r,c])) && !sameCell(col.path[0], [r,c]);
+
+    if (occupant === col.id) {
+      // jumped onto an earlier point of its own path
+      const idx = col.path.findIndex(p => sameCell(p, [r, c]));
+      if (idx >= 0) freeCellsAfter(col, idx + 1);
+    } else {
+      col.path.push([r, c]);
+      cellOwner[r][c] = col.id;
+      if (!moveCounted) { moves++; hudMoves.textContent = moves; moveCounted = true; }
+    }
+    renderPaths();
+    if (isOwnOtherEndpoint) {
+      dragging = null;
+      checkWin();
+    }
+  }
+
+  function onPointerUp(e) {
+    dragging = null;
+    checkWin();
+  }
+
+  function isConnected(col) {
+    if (col.path.length < 1) return false;
+    const start = col.path[0];
+    const end = col.path[col.path.length - 1];
+    const startIsA = sameCell(start, col.a);
+    const endpointMatch = startIsA ? sameCell(end, col.b) : sameCell(end, col.a);
+    return endpointMatch && (sameCell(start, col.a) || sameCell(start, col.b));
+  }
+
+  function checkWin() {
+    const allConnected = colors.every(isConnected);
+    if (!allConnected) return;
+    let filled = 0;
+    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) if (cellOwner[r][c]) filled++;
+    if (filled !== size * size) return;
+
+    if (levelIndex + 1 > furthestUnlocked) {
+      furthestUnlocked = Math.min(levelIndex + 1, LEVELS.length - 1);
+      try { localStorage.setItem('threads-furthest', String(furthestUnlocked)); } catch (e) {}
+    }
+    winDetail.textContent = 'in ' + moves + ' move' + (moves === 1 ? '' : 's');
+    document.getElementById('nextBtn').textContent = levelIndex < LEVELS.length - 1 ? 'Next puzzle' : 'Play again';
+    winOverlay.classList.add('show');
+    renderLevelDots();
+  }
+
+  boardEl.addEventListener('pointerdown', onPointerDown);
+  boardEl.addEventListener('pointermove', onPointerMove);
+  boardEl.addEventListener('pointerup', onPointerUp);
+  boardEl.addEventListener('pointercancel', onPointerUp);
+
+  document.getElementById('resetBtn').addEventListener('click', () => initLevel(levelIndex));
+  document.getElementById('nextBtn').addEventListener('click', () => {
+    if (levelIndex < LEVELS.length - 1) initLevel(levelIndex + 1);
+    else initLevel(levelIndex);
+  });
+
+  initLevel(Math.min(furthestUnlocked, 0));
+})();
+</script>
+</body>
+</html>
